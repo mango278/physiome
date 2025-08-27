@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
-import { Menu, X, Activity, Brain, Dumbbell, BarChart3, LogOut, Home } from "lucide-react"
+import { Menu, X, Activity, Brain, Dumbbell, BarChart3, LogOut, Home, MessageCircle } from "lucide-react"
 
 export function Navigation() {
   const [isOpen, setIsOpen] = useState(false)
@@ -23,6 +23,7 @@ export function Navigation() {
     { href: "/injury", label: "Injury Assessment", icon: Brain },
     { href: "/plan", label: "Workout Plans", icon: Dumbbell },
     { href: "/check-in", label: "Progress Check-in", icon: BarChart3 },
+    { href: "/chat", label: "Chat", icon: MessageCircle },
   ]
 
   const isActive = (href: string) => pathname === href
