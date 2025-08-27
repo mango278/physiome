@@ -1,5 +1,3 @@
-// Tiny OpenAI-compatible client using fetch + streaming (SSE-like).
-// Works with providers that mimic the OpenAI Chat Completions API.
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 export async function* streamChat({
@@ -10,24 +8,26 @@ export async function* streamChat({
 }: {
   baseUrl?: string; apiKey?: string; model?: string; messages: ChatMessage[];
 }) {
+  // Fast env validation at source of truth too
+  if (!baseUrl || !apiKey || !model) {
+    throw new Error("MODEL_BASE_URL / MODEL_API_KEY / MODEL_NAME not configured");
+  }
+
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-      // temperature/top_p etc. optional
-    }),
+    body: JSON.stringify({ model, messages, stream: true }),
   });
 
-  if (!res.ok || !res.body) {
+  if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Model API error (${res.status}): ${text}`);
+    const detail = text || `HTTP ${res.status}`;
+    throw new Error(`Model API error: ${detail}`);
   }
+  if (!res.body) throw new Error("Model API returned no body");
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -36,11 +36,12 @@ export async function* streamChat({
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
     buffer += decoder.decode(value, { stream: true });
 
-    // OpenAI-style event stream: lines starting with "data: ..."
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) continue;
@@ -50,13 +51,12 @@ export async function* streamChat({
       try {
         const json = JSON.parse(payload);
         const delta = json.choices?.[0]?.delta?.content;
-        if (typeof delta === "string" && delta.length) {
-          yield delta;
-        }
-      } catch {
-        // ignore parse hiccups
+        if (typeof delta === "string" && delta.length) yield delta;
+        // Also surface tool/usage errors if provider sends them inline
+        if (json.error) throw new Error(`Provider error: ${JSON.stringify(json.error)}`);
+      } catch (e) {
+        // If it's not valid JSON, ignore that line
       }
     }
   }
 }
-
