@@ -1,43 +1,45 @@
 import { NextRequest } from "next/server";
-import { streamChat } from "@/lib/ai/client"; // you already built this earlier
-import { systemPrompt, composeUserMessage } from "@/lib/ai/prompt";
 import { supabaseServer } from "@/lib/supabase/server";
-import {
-  getLatestHypothesisSummary,
-  getLatestPlanSummary,
-  getRecentLogs,
-} from "@/lib/summaries";
+import { getLatestHypothesisSummary, getLatestPlanSummary, getRecentLogs } from "@/lib/summaries";
+import { systemPrompt, composeUserMessage } from "@/lib/ai/prompt";
+import { streamChat } from "@/lib/ai/client";
 
 export const runtime = "nodejs";
 
+function assertEnv() {
+  const missing: string[] = [];
+  if (!process.env.MODEL_BASE_URL) missing.push("MODEL_BASE_URL");
+  if (!process.env.MODEL_API_KEY) missing.push("MODEL_API_KEY");
+  if (!process.env.MODEL_NAME) missing.push("MODEL_NAME");
+  if (missing.length) {
+    throw new Error(`Missing required env: ${missing.join(", ")}`);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { input } = await req.json();
+    assertEnv();
 
+    const { input } = await req.json();
     if (!input || typeof input !== "string") {
-      return new Response("Missing input", { status: 400 });
+      return Response.json({ error: "Missing 'input' string" }, { status: 400 });
     }
 
     const supabase = supabaseServer();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr) {
+      console.error("[/api/ai/chat] auth.getUser error:", userErr);
+      return Response.json({ error: "Auth error", detail: String(userErr.message || userErr) }, { status: 401 });
+    }
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!user) return new Response("Unauthorized", { status: 401 });
-
+    // Fetch concise context (RLS applies)
     const hypothesis = await getLatestHypothesisSummary(supabase);
     const plan = await getLatestPlanSummary(supabase, hypothesis?.id);
     const logs = await getRecentLogs(supabase, plan?.id, 3);
 
-    const messages = [
-      { role: "system", content: systemPrompt() },
-      {
-        role: "user",
-        content: composeUserMessage(input, { hypothesis, plan, logs }),
-      },
-    ] as const;
-
-    const severe = logs.some((l) => (l.pain ?? 0) >= 7);
+    // Simple red-flag gate
+    const severe = logs.some((l: any) => (l.pain ?? 0) >= 7);
     if (severe) {
       return new Response(
         "Severe pain detected in logs. Please seek in-person care.",
@@ -45,6 +47,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const messages = [
+      { role: "system", content: systemPrompt() },
+      { role: "user", content: composeUserMessage(input, { hypothesis, plan, logs }) },
+    ] as const;
+
+    // Stream response
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
@@ -53,7 +61,10 @@ export async function POST(req: NextRequest) {
             controller.enqueue(encoder.encode(chunk));
           }
         } catch (err: any) {
-          controller.error(err);
+          console.error("[/api/ai/chat] stream error:", err?.message, err);
+          // Return error mid-stream as JSON block so client can display it
+          const payload = JSON.stringify({ error: "Model stream failed", detail: String(err?.message || err) });
+          controller.enqueue(encoder.encode(`\n\n${payload}\n`));
         } finally {
           controller.close();
         }
@@ -68,7 +79,10 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    console.error(err);
-    return new Response("Error", { status: 500 });
+    console.error("[/api/ai/chat] fatal:", err?.message, err);
+    return Response.json(
+      { error: "Server error", detail: String(err?.message || err) },
+      { status: 500 }
+    );
   }
 }
