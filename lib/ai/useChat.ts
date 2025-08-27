@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 
 export function useAiChat() {
@@ -7,15 +9,18 @@ export function useAiChat() {
   async function ask(input: string) {
     setLoading(true);
     setText("");
+
     const res = await fetch("/api/ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input }),
     });
+
     if (!res.ok || !res.body) {
       setLoading(false);
       throw new Error(`HTTP ${res.status}`);
     }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
@@ -24,9 +29,9 @@ export function useAiChat() {
       if (done) break;
       setText((t) => t + decoder.decode(value));
     }
+
     setLoading(false);
   }
 
   return { loading, text, ask };
 }
-
