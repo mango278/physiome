@@ -101,4 +101,3 @@ export async function getRecentLogs(supabase: SupabaseClient, planId?: string, l
     notes: row.notes,
   })) as SessionMini[];
 }
-

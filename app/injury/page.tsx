@@ -13,10 +13,9 @@ export default async function InjuryPage() {
     redirect("/auth/login")
   }
 
-  // Get user's recent injury hypotheses
   const { data: recentHypotheses } = await supabase
-    .from("injury_hypotheses")
-    .select("*")
+    .from("injury_hypothesis")
+    .select("id, created_at, subjective, differentials, status")
     .eq("user_id", data.user.id)
     .order("created_at", { ascending: false })
     .limit(3)
@@ -46,33 +45,37 @@ export default async function InjuryPage() {
               <CardContent>
                 {recentHypotheses && recentHypotheses.length > 0 ? (
                   <div className="space-y-4">
-                    {recentHypotheses.map((hypothesis) => (
-                      <div key={hypothesis.id} className="p-4 bg-gray-50 rounded-lg">
-                        <div className="flex justify-between items-start mb-2">
-                          <h4 className="font-medium text-gray-900">Assessment</h4>
-                          <span className="text-xs text-gray-500">
-                            {new Date(hypothesis.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-600 mb-2">
-                          <strong>Symptoms:</strong> {hypothesis.symptoms}
-                        </p>
-                        <p className="text-sm text-gray-800 mb-2">
-                          <strong>Hypothesis:</strong> {hypothesis.hypothesis}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-blue-600">
-                            Confidence: {hypothesis.confidence_score}/10
-                          </span>
-                          <div className="flex-1 bg-gray-200 rounded-full h-2">
-                            <div
-                              className="bg-blue-600 h-2 rounded-full"
-                              style={{ width: `${(hypothesis.confidence_score / 10) * 100}%` }}
-                            />
+                    {recentHypotheses.map((hypothesis) => {
+                      const differentials = hypothesis.differentials as any
+                      const hypothesisText = differentials?.hypothesis || "Assessment completed"
+                      const confidenceScore = differentials?.confidence_score || 5
+
+                      return (
+                        <div key={hypothesis.id} className="p-4 bg-gray-50 rounded-lg">
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-medium text-gray-900">Assessment</h4>
+                            <span className="text-xs text-gray-500">
+                              {new Date(hypothesis.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <strong>Symptoms:</strong> {hypothesis.subjective}
+                          </p>
+                          <p className="text-sm text-gray-800 mb-2">
+                            <strong>Hypothesis:</strong> {hypothesisText}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-blue-600">Confidence: {confidenceScore}/10</span>
+                            <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-32">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full"
+                                style={{ width: `${(confidenceScore / 10) * 100}%` }}
+                              />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="text-gray-500 text-sm">No previous assessments found.</p>

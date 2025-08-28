@@ -17,9 +17,10 @@ export default async function DashboardPage() {
   // Get user profile
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single()
 
-  // Get recent activity counts
+  const { data: allAssessments } = await supabase.from("injury_hypothesis").select("id").eq("user_id", data.user.id)
+
   const { data: recentHypotheses } = await supabase
-    .from("injury_hypotheses")
+    .from("injury_hypothesis")
     .select("id")
     .eq("user_id", data.user.id)
     .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
@@ -43,6 +44,21 @@ export default async function DashboardPage() {
 
         {/* Quick Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Total</p>
+                  <p className="text-2xl font-bold text-gray-900">{allAssessments?.length || 0}</p>
+                  <p className="text-sm text-gray-500">Assessments</p>
+                </div>
+                <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-blue-600 text-xl">🩺</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">

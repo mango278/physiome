@@ -24,55 +24,6 @@ export function InjuryAssessmentForm({ userId }: InjuryAssessmentFormProps) {
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
-  const generateHypothesis = (symptoms: string) => {
-    // Simulated AI logic - in a real app, this would call an AI service
-    const commonConditions = [
-      {
-        keywords: ["back", "lower back", "spine", "lumbar"],
-        hypothesis: "Lower back strain or muscle spasm, possibly due to poor posture or sudden movement",
-        confidence: 7,
-      },
-      {
-        keywords: ["knee", "kneecap", "patella"],
-        hypothesis: "Patellofemoral pain syndrome or knee strain from overuse or improper movement",
-        confidence: 6,
-      },
-      {
-        keywords: ["shoulder", "arm", "rotator"],
-        hypothesis: "Rotator cuff strain or shoulder impingement from repetitive overhead movements",
-        confidence: 8,
-      },
-      {
-        keywords: ["neck", "cervical", "stiff neck"],
-        hypothesis: "Cervical strain or tension headache from poor posture or stress",
-        confidence: 7,
-      },
-      {
-        keywords: ["ankle", "foot", "heel"],
-        hypothesis: "Ankle sprain or plantar fasciitis from overuse or improper footwear",
-        confidence: 6,
-      },
-    ]
-
-    const lowerSymptoms = symptoms.toLowerCase()
-
-    for (const condition of commonConditions) {
-      if (condition.keywords.some((keyword) => lowerSymptoms.includes(keyword))) {
-        return {
-          hypothesis: condition.hypothesis,
-          confidence: condition.confidence + Math.floor(Math.random() * 2), // Add some variation
-        }
-      }
-    }
-
-    // Default response for unmatched symptoms
-    return {
-      hypothesis:
-        "General musculoskeletal strain. Recommend rest, ice, and gentle movement. Consider consulting a healthcare professional for persistent symptoms.",
-      confidence: 5,
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!symptoms.trim()) return
@@ -81,25 +32,116 @@ export function InjuryAssessmentForm({ userId }: InjuryAssessmentFormProps) {
     setError(null)
 
     try {
-      // Generate AI hypothesis (simulated)
-      const aiResult = generateHypothesis(symptoms)
+      console.log("[v0] Starting AI API call for injury assessment")
+
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          input: `Please analyze these symptoms and provide an injury hypothesis with confidence score: ${symptoms}`,
+        }),
+      })
+
+      console.log("[v0] AI API response status:", response.status)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("[v0] AI API error response:", errorText)
+        throw new Error(`AI service error: ${response.status} - ${errorText}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error("No response body received")
+      }
+
+      let aiResponse = ""
+      const decoder = new TextDecoder()
+
+      // Read the streaming response
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        aiResponse += chunk
+      }
+
+      console.log("[v0] Complete AI response:", aiResponse)
+
+      let aiResult
+      try {
+        // First try to parse as JSON
+        const jsonResponse = JSON.parse(aiResponse)
+        aiResult = {
+          hypothesis: jsonResponse.hypothesis || jsonResponse.assessment || aiResponse,
+          confidence: jsonResponse.confidence || jsonResponse.confidence_score || 5,
+        }
+        console.log("[v0] Parsed JSON response:", aiResult)
+      } catch {
+        // Enhanced fallback parsing for text responses
+        console.log("[v0] Parsing as text response")
+
+        // Look for confidence patterns (more flexible)
+        const confidencePatterns = [
+          /confidence[:\s]*(\d+(?:\.\d+)?)/i,
+          /(\d+(?:\.\d+)?)%?\s*confidence/i,
+          /score[:\s]*(\d+(?:\.\d+)?)/i,
+          /certainty[:\s]*(\d+(?:\.\d+)?)/i,
+        ]
+
+        let confidence = 5 // default
+        for (const pattern of confidencePatterns) {
+          const match = aiResponse.match(pattern)
+          if (match) {
+            confidence = Math.round(Number.parseFloat(match[1]))
+            console.log("[v0] Found confidence:", confidence, "using pattern:", pattern)
+            break
+          }
+        }
+
+        // Clean up the hypothesis text (remove confidence mentions for cleaner display)
+        let hypothesis = aiResponse.trim()
+        hypothesis = hypothesis.replace(/confidence[:\s]*\d+(?:\.\d+)?%?/gi, "")
+        hypothesis = hypothesis.replace(/score[:\s]*\d+(?:\.\d+)?/gi, "")
+        hypothesis = hypothesis.trim()
+
+        aiResult = {
+          hypothesis: hypothesis || "Assessment completed - please review with a healthcare professional",
+          confidence: Math.min(Math.max(confidence, 1), 10), // Ensure 1-10 range
+        }
+        console.log("[v0] Parsed text response:", aiResult)
+      }
 
       // Save to database
       const supabase = createClient()
-      const { error: dbError } = await supabase.from("injury_hypotheses").insert({
+      const { error: dbError } = await supabase.from("injury_hypothesis").insert({
         user_id: userId,
-        symptoms: symptoms.trim(),
-        hypothesis: aiResult.hypothesis,
-        confidence_score: Math.min(aiResult.confidence, 10),
+        subjective: symptoms.trim(), // Store symptoms in subjective column
+        differentials: {
+          hypothesis: aiResult.hypothesis,
+          confidence_score: Math.min(Math.max(aiResult.confidence, 1), 10),
+          ai_generated: true,
+          timestamp: new Date().toISOString(),
+        }, // Store AI results in differentials JSON column
+        status: "active",
+        version: 1,
       })
 
-      if (dbError) throw dbError
+      if (dbError) {
+        console.error("[v0] Database error:", dbError)
+        throw dbError
+      }
 
+      console.log("[v0] Successfully saved assessment to database")
       setResult(aiResult)
 
       // Refresh the page to show the new assessment in the recent list
       router.refresh()
     } catch (error: unknown) {
+      console.error("[v0] Error in injury assessment:", error)
       setError(error instanceof Error ? error.message : "An error occurred")
     } finally {
       setIsLoading(false)
