@@ -15,7 +15,7 @@ export default async function CheckInPage() {
     redirect("/auth/login")
   }
 
-  // Get user's workout plans for the check-in form
+  // Get user's workout plans for the check-in forms
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
     .select("id, plan_name, exercises")
